@@ -1,0 +1,104 @@
+name: NPM Packages CI
+on:
+  push:
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/**/*'
+      - 'testapps/**/*'
+      - '.github/actions/go/action.yaml'
+      - '.github/actions/node/action.yaml'
+      - '.github/workflows/packages-ci.yaml'
+      - '!packages/*-testapp/**'
+      - 'examples/**/*'
+      - '!*.md'
+      - '!**/*.md'
+  pull_request:
+    branches:
+      - main
+      - next
+    paths:
+      - 'testapps/**/*'
+      - 'packages/**/*'
+      - '.github/actions/go/action.yaml'
+      - '.github/actions/node/action.yaml'
+      - '.github/workflows/packages-ci.yaml'
+      - '!packages/*-testapp/**'
+      - 'examples/**/*'
+      - '!*.md'
+      - '!**/*.md'
+
+concurrency:
+  group: ${{github.workflow}}-${{github.head_ref}}
+  cancel-in-progress: true
+
+env:
+  WORKING_DIRECTORY: '.'
+  CI: true
+
+jobs:
+  build_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/go
+        with:
+          working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - uses: ./.github/actions/node
+        with:
+          working-directory: ${{ env.WORKING_DIRECTORY }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Nextjs builds
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ github.workspace }}/testapps/nextjs/.next/cache
+          # Generate a new cache whenever packages or source files change
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('testapps/nextjs/**.[jt]s', 'testapps/nextjs/**.[jt]sx') }}
+          # If source files changed but packages didn't, rebuild from a prior cache
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+
+      - name: Install Protoc
+        uses: abelfodil/protoc-action@v1
+        with:
+          protoc-version: '21.5'
+
+      - name: Setup wunderctl
+        run: |
+          make install
+          echo WUNDERCTL_BINARY_PATH=$(which wunderctl) >> $GITHUB_ENV
+
+      - name: Bootstrap PNPM workspace
+        run: ./scripts/pnpm.sh
+
+      - name: Build all libs + apps
+        run: pnpm build
+
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v6
+
+      - name: Get the last successful commit for the current branch
+        uses: nrwl/nx-set-shas@v3
+        id: last_successful_commit_push
+        with:
+          main-branch-name: ${{ steps.branch-name.outputs.current_branch }} # Get the last successful commit for the current branch.
+
+      - name: Check for formatting errors
+        run: eval "pnpx prettier --check -u $(git diff --name-only --diff-filter=ACMRT -r ${{ steps.last_successful_commit_push.outputs.base }} | xargs)"
+
+      - name: Check if git is not dirty after generating files
+        run: git diff --no-ext-diff --exit-code
+
+      - name: Run all NPM tests
+        run: pnpm test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

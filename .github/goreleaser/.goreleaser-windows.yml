@@ -1,0 +1,74 @@
+# This is an example goreleaser.yaml file with some sane defaults.
+# Make sure to check the documentation at http://goreleaser.com
+project_name: wunderctl
+monorepo:
+  tag_prefix: 'v'
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod download
+    # you may remove this if you don't need go generate
+    - go generate ../...
+builds:
+  - binary: wunderctl
+    id: windows
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -w -s -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=ci -X main.githubAuthDemoClientID={{.Env.GH_AUTH_DEMO_CLIENT_ID}} -X main.githubAuthDemoClientSecret={{.Env.GH_AUTH_DEMO_CLIENT_SECRET}}
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - 386
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
+snapshot:
+  name_template: '{{ .Tag }}-next'
+changelog:
+  use: github
+  # Sorts the changelog by the commit's messages.
+  # Could either be asc, desc or empty
+  # Default is empty
+  sort: asc
+
+  # Group commits messages by given regex and title.
+  # Order value defines the order of the groups.
+  # Proving no regex means all commits will be grouped under the default group.
+  # Groups are disabled when using github-native, as it already groups things by itself.
+  #
+  # Default is no groups.
+  groups:
+    - title: Features
+      regexp: '^.*feat.*:+.*$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*fix.*:+.*$'
+      order: 1
+
+  filters:
+    # Commit messages matching the regexp listed here will be removed from
+    # the changelog
+    # Default is empty
+    exclude:
+      - '^docs:'
+      - chore
+      - typo
+release:
+  name_template: 'Release {{.ProjectName}} {{.Tag}}'
+  header: |
+    This is a new release of the command-line interface (CLI) {{.ProjectName}}.
+    It allows you to create, deploy and manage your WunderGraph application.
+    Please check the [readme](https://github.com/wundergraph/wundergraph) or [documentation](https://wundergraph.com/docs) if you want to learn more.
+
+    For breaking changes, please check the [migration](/docs/migrations) guidelines for more information.
+  github:
+    owner: wundergraph
+    name: wundergraph
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_windows_checksums.txt'

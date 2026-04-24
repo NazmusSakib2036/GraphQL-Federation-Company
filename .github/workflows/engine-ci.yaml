@@ -1,0 +1,90 @@
+name: Engine CI
+on:
+  push:
+    branches:
+      - main
+      - next
+    paths:
+      - '**/*.go'
+      - 'types/**/*'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/actions/go/action.yaml'
+      - '.github/actions/node/action.yaml'
+      - '.github/workflows/engine-ci.yaml'
+      - '!examples/**/*'
+      - '!**/*.md'
+  pull_request:
+    branches:
+      - main
+      - next
+    paths:
+      - '**/*.go'
+      - 'types/**/*'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/actions/go/action.yaml'
+      - '.github/actions/node/action.yaml'
+      - '.github/workflows/engine-ci.yaml'
+      - '!examples/**/*'
+      - '!**/*.md'
+
+concurrency:
+  group: ${{github.workflow}}-${{github.head_ref}}
+  cancel-in-progress: true
+
+env:
+  WORKING_DIRECTORY: '.'
+  CI: true
+
+jobs:
+  build_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      minio:
+        image: minio/minio:edge-cicd
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minio
+          MINIO_ROOT_PASSWORD: minio123
+        options: --name=minio --health-cmd "curl http://localhost:9000/minio/health/live"
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/go
+        with:
+          working-directory: ${{ env.WORKING_DIRECTORY }}
+
+      - uses: ./.github/actions/node
+        with:
+          working-directory: ${{ env.WORKING_DIRECTORY }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Protoc
+        uses: abelfodil/protoc-action@v1
+        with:
+          protoc-version: '21.5'
+
+      - run: make bootstrap-minio
+
+      - run: pnpm install --ignore-scripts
+
+      - run: make engine-dev
+
+      - name: Check if git is not dirty after generating files
+        run: git diff --no-ext-diff --exit-code
+
+      - name: Linters
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: v1.50
+          args: --timeout 2m
+
+      - name: Run unit and integration tests
+        run: make test-go
+        env:
+          INT: true
